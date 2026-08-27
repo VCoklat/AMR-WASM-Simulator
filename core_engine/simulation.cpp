@@ -5,7 +5,6 @@
 #define GRID_WIDTH 20
 #define GRID_HEIGHT 20
 
-// External declarations from pathfinding.cpp
 extern int grid[GRID_WIDTH][GRID_HEIGHT];
 
 extern "C" {
@@ -40,8 +39,7 @@ struct Robot {
 
     void update(float dt) {
         if (state == RobotState::CHARGING) {
-            // Fast charging when docked at (0,0)
-            battery += 40.0f * dt;
+            battery += 40.0f * dt; // Fast charging at dock
             if (battery >= 100.0f) {
                 battery = 100.0f;
                 state = RobotState::IDLE;
@@ -49,20 +47,48 @@ struct Robot {
             return;
         }
 
+        // Drain battery while active
         if (state == RobotState::MOVING) {
-            // Battery drains VERY fast as requested
-            battery -= 25.0f * dt; 
-            if (battery <= 0.0f) {
-                battery = 0.0f;
-                // Force return to charging station (0,0) when battery dies
-                path.clear();
-                path.push_back({0.0f, 0.0f});
-                path_index = 0;
-                state = RobotState::CHARGING;
-                return;
-            }
+            battery -= 25.0f * dt;
+            if (battery < 0.0f) battery = 0.0f;
+        }
 
-            // Follow waypoints smoothly
+        int start_gx = static_cast<int>(std::round(x));
+        int start_gy = static_cast<int>(std::round(y));
+
+        // Dynamic Distance-to-Dock Evaluation Method
+        bool already_heading_home = !path.empty() && path.back().x == 0.0f && path.back().y == 0.0f;
+        if (state != RobotState::CHARGING && !already_heading_home) {
+            // Check exact path length to charging station (0,0) via A*
+            int path_len_to_dock = calculate_path(start_gx, start_gy, 0, 0);
+            
+            // Estimate energy required: drain rate per second / speed = cost per grid unit
+            float energy_per_unit = 25.0f / speed; 
+            float estimated_energy_needed = static_cast<float>(path_len_to_dock) * energy_per_unit;
+            float safety_margin_buffer = 12.0f; // 12% safety buffer for unexpected detours
+
+            // If current battery cannot safely cover the dynamic path home, trigger fail-safe re-routing
+            if (battery <= (estimated_energy_needed + safety_margin_buffer)) {
+                if (path_len_to_dock > 0 && (start_gx != 0 || start_gy != 0)) {
+                    path.clear();
+                    for (int i = 0; i < path_len_to_dock; i++) {
+                        path.push_back({(float)get_path_x(i), (float)get_path_y(i)});
+                    }
+                    path_index = 0;
+                    state = RobotState::MOVING;
+                }
+            }
+        }
+
+        // If already at dock and low battery, lock into charging state
+        if (start_gx == 0 && start_gy == 0 && battery < 50.0f && state != RobotState::CHARGING) {
+            path.clear();
+            state = RobotState::CHARGING;
+            return;
+        }
+
+        // Normal Movement Execution along Waypoints
+        if (state == RobotState::MOVING) {
             if (path_index < path.size()) {
                 Waypoint target = path[path_index];
                 float dx = target.x - x;
@@ -79,7 +105,11 @@ struct Robot {
                     y += (dy / dist) * step;
                 }
             } else {
-                state = RobotState::IDLE;
+                if (std::abs(x - 0.0f) < 0.1f && std::abs(y - 0.0f) < 0.1f) {
+                    state = RobotState::CHARGING;
+                } else {
+                    state = RobotState::IDLE;
+                }
             }
         }
     }
@@ -92,7 +122,6 @@ extern "C" {
     void init_fleet(int num_robots) {
         fleet.clear();
         for(int i = 0; i < num_robots; i++) {
-            // Spread robots near the charging dock (0,0)
             fleet.emplace_back(i, 0.0f, static_cast<float>(i));
         }
     }
@@ -109,12 +138,11 @@ extern "C" {
         if (robot_id < 0 || robot_id >= fleet.size()) return;
         Robot& r = fleet[robot_id];
 
-        if (r.battery < 10.0f) return; // Too low to accept tasks
+        if (r.battery < 15.0f) return; // Insufficient battery to accept new tasks
 
         int start_gx = static_cast<int>(std::round(r.x));
         int start_gy = static_cast<int>(std::round(r.y));
 
-        // Call A* Pathfinding to calculate collision-free route around walls
         int path_length = calculate_path(start_gx, start_gy, target_x, target_y);
         if (path_length > 0) {
             r.path.clear();
@@ -138,7 +166,6 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     int get_robot_state(int id) { return static_cast<int>(fleet[id].state); }
 
-    // Expose active path for visible routing lines in UI
     EMSCRIPTEN_KEEPALIVE
     int get_active_path_length(int robot_id) {
         if (robot_id < 0 || robot_id >= fleet.size()) return 0;
