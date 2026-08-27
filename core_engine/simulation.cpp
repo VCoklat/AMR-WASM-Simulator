@@ -2,32 +2,46 @@
 #include <cmath>
 #include <emscripten/emscripten.h>
 
-// 1. State Machine Definition
+#define GRID_WIDTH 20
+#define GRID_HEIGHT 20
+
+// External declarations from pathfinding.cpp
+extern int grid[GRID_WIDTH][GRID_HEIGHT];
+
+extern "C" {
+    int calculate_path(int start_x, int start_y, int goal_x, int goal_y);
+    int get_path_x(int index);
+    int get_path_y(int index);
+}
+
 enum class RobotState {
     IDLE = 0,
     MOVING = 1,
     CHARGING = 2
 };
 
-// 2. Robot Class & Continuous-Time Mechanics
+struct Waypoint {
+    float x;
+    float y;
+};
+
 struct Robot {
     int id;
     float x;
     float y;
-    float target_x;
-    float target_y;
-    float battery; // 0.0 - 100.0
+    float battery;
     float speed;
     RobotState state;
+    std::vector<Waypoint> path;
+    size_t path_index;
 
     Robot(int id, float start_x, float start_y) 
-        : id(id), x(start_x), y(start_y), target_x(start_x), target_y(start_y), 
-          battery(100.0f), speed(50.0f), state(RobotState::IDLE) {}
+        : id(id), x(start_x), y(start_y), battery(100.0f), speed(6.0f), state(RobotState::IDLE), path_index(0) {}
 
     void update(float dt) {
-        // Logika State: CHARGING
         if (state == RobotState::CHARGING) {
-            battery += 15.0f * dt; // Baterai terisi seiring waktu
+            // Fast charging when docked at (0,0)
+            battery += 40.0f * dt;
             if (battery >= 100.0f) {
                 battery = 100.0f;
                 state = RobotState::IDLE;
@@ -35,64 +49,54 @@ struct Robot {
             return;
         }
 
-        // Logika Perlindungan Baterai (Fail-safe)
-        if (battery < 20.0f && state != RobotState::CHARGING) {
-            // Paksa robot kembali ke Charging Station (asumsi di koordinat 0,0)
-            target_x = 0.0f;
-            target_y = 0.0f;
-            state = RobotState::MOVING;
-        }
-
-        // Logika State: MOVING (Kinematika Dasar)
         if (state == RobotState::MOVING) {
-            float dx = target_x - x;
-            float dy = target_y - y;
-            float distance = std::sqrt(dx * dx + dy * dy);
+            // Battery drains VERY fast as requested
+            battery -= 25.0f * dt; 
+            if (battery <= 0.0f) {
+                battery = 0.0f;
+                // Force return to charging station (0,0) when battery dies
+                path.clear();
+                path.push_back({0.0f, 0.0f});
+                path_index = 0;
+                state = RobotState::CHARGING;
+                return;
+            }
 
-            // Jika sudah sampai tujuan
-            if (distance < 1.0f) {
-                x = target_x;
-                y = target_y;
-                if (battery < 20.0f) {
-                    state = RobotState::CHARGING;
+            // Follow waypoints smoothly
+            if (path_index < path.size()) {
+                Waypoint target = path[path_index];
+                float dx = target.x - x;
+                float dy = target.y - y;
+                float dist = std::sqrt(dx * dx + dy * dy);
+
+                float step = speed * dt;
+                if (step >= dist) {
+                    x = target.x;
+                    y = target.y;
+                    path_index++;
                 } else {
-                    state = RobotState::IDLE;
+                    x += (dx / dist) * step;
+                    y += (dy / dist) * step;
                 }
             } else {
-                // Menghitung pergerakan berdasarkan delta time (dt)
-                float move_dist = speed * dt;
-                
-                // Mencegah overshoot (kebablasan)
-                if (move_dist > distance) move_dist = distance; 
-                
-                // Normalisasi vektor dan update posisi
-                x += (dx / distance) * move_dist;
-                y += (dy / distance) * move_dist;
-                
-                // Kurangi baterai saat bergerak
-                battery -= 2.0f * dt; 
+                state = RobotState::IDLE;
             }
         }
     }
 };
 
-// Global Fleet Manager
 std::vector<Robot> fleet;
 
-// 3. API Bridge untuk JavaScript (WebAssembly Interface)
 extern "C" {
-    
-    // Inisialisasi armada robot
     EMSCRIPTEN_KEEPALIVE
     void init_fleet(int num_robots) {
         fleet.clear();
         for(int i = 0; i < num_robots; i++) {
-            // Tempatkan robot berjejer di sumbu X
-            fleet.emplace_back(i, i * 30.0f, 0.0f);
+            // Spread robots near the charging dock (0,0)
+            fleet.emplace_back(i, 0.0f, static_cast<float>(i));
         }
     }
 
-    // Dipanggil oleh requestAnimationFrame di JavaScript setiap frame
     EMSCRIPTEN_KEEPALIVE
     void update_simulation(float dt) {
         for(auto& robot : fleet) {
@@ -100,19 +104,28 @@ extern "C" {
         }
     }
 
-    // Memberikan perintah dari klik user di UI
     EMSCRIPTEN_KEEPALIVE
-    void assign_task(int robot_id, float target_x, float target_y) {
-        if (robot_id >= 0 && robot_id < fleet.size()) {
-            if (fleet[robot_id].battery >= 20.0f) {
-                fleet[robot_id].target_x = target_x;
-                fleet[robot_id].target_y = target_y;
-                fleet[robot_id].state = RobotState::MOVING;
+    void assign_task(int robot_id, int target_x, int target_y) {
+        if (robot_id < 0 || robot_id >= fleet.size()) return;
+        Robot& r = fleet[robot_id];
+
+        if (r.battery < 10.0f) return; // Too low to accept tasks
+
+        int start_gx = static_cast<int>(std::round(r.x));
+        int start_gy = static_cast<int>(std::round(r.y));
+
+        // Call A* Pathfinding to calculate collision-free route around walls
+        int path_length = calculate_path(start_gx, start_gy, target_x, target_y);
+        if (path_length > 0) {
+            r.path.clear();
+            for (int i = 0; i < path_length; i++) {
+                r.path.push_back({(float)get_path_x(i), (float)get_path_y(i)});
             }
+            r.path_index = 0;
+            r.state = RobotState::MOVING;
         }
     }
 
-    // Getter untuk merender UI di JavaScript
     EMSCRIPTEN_KEEPALIVE
     float get_robot_x(int id) { return fleet[id].x; }
 
@@ -124,4 +137,28 @@ extern "C" {
 
     EMSCRIPTEN_KEEPALIVE
     int get_robot_state(int id) { return static_cast<int>(fleet[id].state); }
+
+    // Expose active path for visible routing lines in UI
+    EMSCRIPTEN_KEEPALIVE
+    int get_active_path_length(int robot_id) {
+        if (robot_id < 0 || robot_id >= fleet.size()) return 0;
+        if (fleet[robot_id].path_index >= fleet[robot_id].path.size()) return 0;
+        return fleet[robot_id].path.size() - fleet[robot_id].path_index;
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    float get_active_path_x(int robot_id, int index) {
+        if (robot_id < 0 || robot_id >= fleet.size()) return 0;
+        size_t idx = fleet[robot_id].path_index + index;
+        if (idx < fleet[robot_id].path.size()) return fleet[robot_id].path[idx].x;
+        return 0;
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    float get_active_path_y(int robot_id, int index) {
+        if (robot_id < 0 || robot_id >= fleet.size()) return 0;
+        size_t idx = fleet[robot_id].path_index + index;
+        if (idx < fleet[robot_id].path.size()) return fleet[robot_id].path[idx].y;
+        return 0;
+    }
 }
