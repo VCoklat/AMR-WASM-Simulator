@@ -19,6 +19,9 @@ export default function App() {
           getBattery: window.Module.cwrap('get_robot_battery', 'number', ['number']),
           getState: window.Module.cwrap('get_robot_state', 'number', ['number']),
           setObstacle: window.Module.cwrap('set_obstacle', 'null', ['number', 'number', 'number']),
+          getActivePathLength: window.Module.cwrap('get_active_path_length', 'number', ['number']),
+          getActivePathX: window.Module.cwrap('get_active_path_x', 'number', ['number', 'number']),
+          getActivePathY: window.Module.cwrap('get_active_path_y', 'number', ['number', 'number']),
         };
 
         cpp.current.initFleet(3);
@@ -55,7 +58,7 @@ export default function App() {
             <>
               <CanvasGrid cpp={cpp.current} />
               <div style={{ marginTop: '15px', padding: '12px 20px', backgroundColor: '#f1f5f9', borderRadius: '8px', color: '#475569', fontSize: '0.9rem', maxWidth: '600px', textAlign: 'center' }}>
-                <strong>Interactive Controls:</strong> Click anywhere on the open grid to dispatch an <span style={{ color: '#22c55e', fontWeight: 'bold' }}>IDLE</span> robot. Watch them transition to <span style={{ color: '#3b82f6', fontWeight: 'bold' }}>MOVING</span>, drain battery, and trigger auto-charging when critical.
+                <strong>Interactive Controls:</strong> Click anywhere on the open grid to dispatch Robot 0. Blue routing lines guide units around impassable <strong>Warehouse Walls</strong>.
               </div>
             </>
           )}
@@ -68,35 +71,30 @@ export default function App() {
           <div>
             <h3 style={{ marginTop: 0, color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px' }}>Project Background</h3>
             <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#475569', margin: '8px 0 0 0' }}>
-              In modern automated smart factories and logistics hubs, coordinating fleets of Autonomous Mobile Robots (AMRs) requires precise, deterministic real-time processing. This project models a warehouse floor digital twin to evaluate kinematics, runtime task routing, and autonomous power management.
+              Smart warehouses require deterministic real-time collision avoidance and smart battery management. This digital twin simulates a multi-agent floor featuring impassable physical storage rack barriers.
             </p>
           </div>
 
-          {/* Architecture & Performance */}
+          {/* Fleet Architecture */}
           <div>
-            <h3 style={{ color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px', marginTop: 0 }}>System Architecture & Performance</h3>
+            <h3 style={{ color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px', marginTop: 0 }}>Multi-Robot Fleet Architecture</h3>
             <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#475569', margin: '8px 0 0 0' }}>
-              The core simulation engine is written in native <strong>C++</strong> and compiled into <strong>WebAssembly (WASM)</strong> via Emscripten. It calculates physics, continuous-time motion dynamics, and state transitions independently in memory. The <strong>React</strong> frontend serves strictly as a high-performance presentation layer, querying memory via a <code>requestAnimationFrame</code> loop to maintain smooth 60 FPS rendering without Garbage Collection bottlenecks.
+              The engine coordinates <strong>3 autonomous units</strong> sharing identical infrastructure:
             </p>
+            <ul style={{ fontSize: '0.88rem', lineHeight: '1.5', color: '#475569', margin: '6px 0 0 20px', padding: 0 }}>
+              <li><strong>Concurrent Processing:</strong> Manages independent state machines simultaneously inside C++ memory.</li>
+              <li><strong>Shared Docking:</strong> All units contend for the central charging infrastructure at coordinate <code>(0,0)</code>.</li>
+            </ul>
           </div>
 
-          {/* Detailed State Machine & Charging Mechanics */}
+          {/* State Machine & Dynamic Distance-to-Dock Evaluation */}
           <div>
-            <h3 style={{ color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px', marginTop: 0 }}>State Machine & Autonomous Charging Mechanics</h3>
-            <div style={{ fontSize: '0.88rem', lineHeight: '1.5', color: '#475569', display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '8px' }}>
-              <div>
-                <strong style={{ color: '#22c55e' }}>1. IDLE State (Green):</strong> Robots remain stationary on standby at their current grid positions, continuously monitoring tasks and battery levels.
-              </div>
-              <div>
-                <strong style={{ color: '#3b82f6' }}>2. MOVING State (Blue):</strong> Vector kinematics compute displacement using delta-time ($dt$) scaling to ensure frame-rate independent movement, steadily depleting battery reserves per second.
-              </div>
-              <div>
-                <strong style={{ color: '#eab308' }}>3. Autonomous Fail-Safe & CHARGING State (Yellow):</strong> 
-                <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>
-                  <li><strong>Critical Threshold Trigger:</strong> If battery drops below 20%, an automated fail-safe overrides current instructions, re-routing the robot back to the charging station at coordinate <code>(0,0)</code>.</li>
-                  <li><strong>Stationary Regeneration:</strong> Upon arriving at the dock, motion is paused and energy is regenerated using continuous-time formulas until reaching 100%.</li>
-                  <li><strong>State Recovery:</strong> Once fully charged, the robot automatically transitions back to <strong>IDLE</strong>, ready to accept new dispatch assignments.</li>
-                </ul>
+            <h3 style={{ color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px', marginTop: 0 }}>State Machine & Dynamic Energy Evaluation</h3>
+            <div style={{ fontSize: '0.88rem', lineHeight: '1.5', color: '#475569', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+              <div><strong style={{ color: '#22c55e' }}>1. IDLE (Green):</strong> Standby state awaiting tasks.</div>
+              <div><strong style={{ color: '#3b82f6' }}>2. MOVING (Blue):</strong> Navigates via A* pathfinding around <strong>Warehouse Walls</strong> while drawing energy.</div>
+              <div><strong style={{ color: '#eab308' }}>3. Dynamic Distance-to-Dock Fail-Safe (Yellow):</strong> 
+                Instead of a fixed percentage trigger, the system continuously computes the exact A* path length back to <code>(0,0)</code>. If remaining battery drops below the <strong>calculated traversal energy cost plus safety buffer</strong>, current tasks are overridden to guarantee safe dock return before power exhaustion.
               </div>
             </div>
           </div>
