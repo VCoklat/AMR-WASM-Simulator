@@ -62,7 +62,7 @@ struct Robot {
 
     void update(float dt) {
         if (state == RobotState::CHARGING) {
-            battery += 35.0f * dt; // Fast dock regeneration
+            battery += 35.0f * dt;
             if (battery >= 100.0f) {
                 battery = 100.0f;
                 state = RobotState::IDLE;
@@ -89,7 +89,6 @@ struct Robot {
         }();
 
         if (state != RobotState::CHARGING && !heading_to_dock) {
-            // Find the closest charging dock via A* path length
             int best_dock_x = 0, best_dock_y = 0;
             int shortest_path_len = 99999;
 
@@ -121,14 +120,12 @@ struct Robot {
             }
         }
 
-        // Auto-lock into charging when arriving at any dock with low/moderate battery
         if (isAtDock() && battery < 85.0f && state != RobotState::CHARGING) {
             path.clear();
             state = RobotState::CHARGING;
             return;
         }
 
-        // Movement Execution along Waypoints
         if (state == RobotState::MOVING) {
             if (path_index < path.size()) {
                 Waypoint target = path[path_index];
@@ -163,7 +160,6 @@ extern "C" {
     void init_fleet(int num_robots) {
         fleet.clear();
         for(int i = 0; i < num_robots; i++) {
-            // Assign each robot to start at its corresponding charging dock
             int dock_idx = i % CHARGING_DOCKS.size();
             fleet.emplace_back(i, CHARGING_DOCKS[dock_idx].x, CHARGING_DOCKS[dock_idx].y, dock_idx);
         }
@@ -193,6 +189,39 @@ extern "C" {
             }
             r.path_index = 0;
             r.state = RobotState::MOVING;
+        }
+    }
+
+    // Emergency Recall routing to the nearest dock
+    EMSCRIPTEN_KEEPALIVE
+    void emergency_recall(int robot_id) {
+        if (robot_id < 0 || robot_id >= fleet.size()) return;
+        Robot& r = fleet[robot_id];
+        int start_gx = static_cast<int>(std::round(r.x));
+        int start_gy = static_cast<int>(std::round(r.y));
+
+        int best_dock_x = 0, best_dock_y = 0;
+        int shortest_len = 99999;
+
+        for (const auto& dock : CHARGING_DOCKS) {
+            int p_len = calculate_path(start_gx, start_gy, static_cast<int>(dock.x), static_cast<int>(dock.y));
+            if (p_len > 0 && p_len < shortest_len) {
+                shortest_len = p_len;
+                best_dock_x = static_cast<int>(dock.x);
+                best_dock_y = static_cast<int>(dock.y);
+            }
+        }
+
+        if (shortest_len > 0) {
+            int path_len = calculate_path(start_gx, start_gy, best_dock_x, best_dock_y);
+            if (path_len > 0) {
+                r.path.clear();
+                for (int i = 0; i < path_len; i++) {
+                    r.path.push_back({(float)get_path_x(i), (float)get_path_y(i)});
+                }
+                r.path_index = 0;
+                r.state = RobotState::MOVING;
+            }
         }
     }
 
