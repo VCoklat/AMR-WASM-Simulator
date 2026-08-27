@@ -5,6 +5,13 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
   const animationRef = useRef(null);
   const lastTimeRef = useRef(0);
 
+  // Distributed charging docks coordinates matching C++ backend
+  const chargingDocks = [
+    { x: 0, y: 0 },
+    { x: 0, y: 19 },
+    { x: 19, y: 0 }
+  ];
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -35,7 +42,27 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         }
       }
 
-      // 2. Render Active Routing Lines for all robots
+      // 2. Render Charging Dock Stations with Glowing Pad & Lightning Icon
+      chargingDocks.forEach((dock, idx) => {
+        const dx = dock.x * tileSize;
+        const dy = dock.y * tileSize;
+
+        // Dock background pad
+        ctx.fillStyle = '#fef08a'; // Soft yellow warning pad
+        ctx.fillRect(dx + 2, dy + 2, tileSize - 4, tileSize - 4);
+        ctx.strokeStyle = '#ca8a04';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(dx + 2, dy + 2, tileSize - 4, tileSize - 4);
+
+        // Lightning Symbol
+        ctx.fillStyle = '#a16207';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⚡', dx + tileSize / 2, dy + tileSize / 2);
+      });
+
+      // 3. Render Active Routing Lines
       const routeColors = ['#3b82f6', '#ec4899', '#8b5cf6'];
       for (let i = 0; i < numRobots; i++) {
         const pathLen = cpp.getActivePathLength ? cpp.getActivePathLength(i) : 0;
@@ -56,23 +83,37 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         }
       }
 
-      // 3. Render Fleet Robots with IDs and Telemetry
+      // 4. Render Professional Industrial AMR Robot Icons
       for (let i = 0; i < numRobots; i++) {
-        const rx = cpp.getRobotX(i);
-        const ry = cpp.getRobotY(i);
+        const rx = cpp.getRobotX(i) * tileSize;
+        const ry = cpp.getRobotY(i) * tileSize;
         const battery = Math.max(0, cpp.getBattery(i));
         const state = cpp.getState(i);
 
-        ctx.fillStyle = state === 2 ? '#eab308' : (state === 1 ? '#3b82f6' : '#22c55e');
+        // Status border / body color
+        const statusColor = state === 2 ? '#eab308' : (state === 1 ? '#3b82f6' : '#22c55e');
 
+        // Draw sleek rounded AMR chassis body
+        ctx.fillStyle = '#1e293b'; // Dark industrial carbon chassis
         ctx.beginPath();
-        ctx.arc(rx * tileSize + tileSize / 2, ry * tileSize + tileSize / 2, tileSize / 2.5, 0, Math.PI * 2);
+        ctx.roundRect(rx + 4, ry + 4, tileSize - 8, tileSize - 8, [6]);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = statusColor;
+        ctx.stroke();
+
+        // Draw status indicator LED light on top of robot
+        ctx.fillStyle = statusColor;
+        ctx.beginPath();
+        ctx.arc(rx + tileSize / 2, ry + tileSize / 2, 5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Label Robot ID and Battery
-        ctx.fillStyle = '#000';
+        // Label Robot ID and Battery Text above
+        ctx.fillStyle = '#0f172a';
         ctx.font = 'bold 10px sans-serif';
-        ctx.fillText(`R${i} ${battery.toFixed(0)}%`, rx * tileSize - 2, ry * tileSize - 4);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(`R${i} ${battery.toFixed(0)}%`, rx, ry - 4);
       }
 
       animationRef.current = requestAnimationFrame(renderLoop);
@@ -90,7 +131,7 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
     const gridX = Math.floor(clickX / tileSize);
     const gridY = Math.floor(clickY / tileSize);
 
-    // Concurrent dispatch: Find the nearest IDLE robot to handle the click
+    // Auto-dispatch nearest available IDLE robot
     let bestRobotId = -1;
     let minDistance = Infinity;
 
@@ -122,13 +163,15 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         style={{
           border: '2px solid #333',
           cursor: 'crosshair',
-          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+          backgroundColor: '#ffffff'
         }}
       />
-      <div style={{ display: 'flex', gap: '15px', marginTop: '10px', fontSize: '0.85rem', color: '#64748b' }}>
+      <div style={{ display: 'flex', gap: '15px', marginTop: '10px', fontSize: '0.85rem', color: '#64748b', flexWrap: 'wrap', justifyContent: 'center' }}>
         <span>🟩 <strong>IDLE</strong></span>
         <span>🟦 <strong>MOVING</strong></span>
         <span>🟨 <strong>CHARGING</strong></span>
+        <span>⚡ <strong>Charging Dock</strong></span>
         <span>⬛ <strong>Warehouse Wall</strong></span>
       </div>
     </div>
