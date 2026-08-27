@@ -2,8 +2,8 @@
 
 echo "Mulai kompilasi C++ ke WebAssembly..."
 
-# Perhatikan bahwa sekarang ada dua file .cpp yang dimasukkan
-emcc core_engine/simulation.cpp core_engine/pathfinding.cpp \
+# MENGGUNAKAN em++ KARENA KITA MENGKOMPILASI KODE C++
+em++ core_engine/simulation.cpp core_engine/pathfinding.cpp \
   -O3 \
   -s WASM=1 \
   -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
