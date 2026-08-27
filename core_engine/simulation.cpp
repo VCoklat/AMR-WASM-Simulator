@@ -1,5 +1,6 @@
 #include <vector>
 #include <cmath>
+#include <algorithm>
 #include <emscripten/emscripten.h>
 
 #define GRID_WIDTH 20
@@ -24,6 +25,18 @@ struct Waypoint {
     float y;
 };
 
+struct Dock {
+    float x;
+    float y;
+};
+
+// Distributed charging stations across the warehouse floor
+const std::vector<Dock> CHARGING_DOCKS = {
+    {0.0f, 0.0f},   // Dock 0 (Top-Left)
+    {0.0f, 19.0f},  // Dock 1 (Bottom-Left)
+    {19.0f, 0.0f}   // Dock 2 (Top-Right)
+};
+
 struct Robot {
     int id;
     float x;
@@ -33,13 +46,23 @@ struct Robot {
     RobotState state;
     std::vector<Waypoint> path;
     size_t path_index;
+    int assigned_dock_idx;
 
-    Robot(int id, float start_x, float start_y) 
-        : id(id), x(start_x), y(start_y), battery(100.0f), speed(5.0f), state(RobotState::IDLE), path_index(0) {}
+    Robot(int id, float start_x, float start_y, int dock_idx) 
+        : id(id), x(start_x), y(start_y), battery(100.0f), speed(5.0f), state(RobotState::IDLE), path_index(0), assigned_dock_idx(dock_idx) {}
+
+    bool isAtDock() {
+        int gx = static_cast<int>(std::round(x));
+        int gy = static_cast<int>(std::round(y));
+        for (const auto& dock : CHARGING_DOCKS) {
+            if (gx == static_cast<int>(dock.x) && gy == static_cast<int>(dock.y)) return true;
+        }
+        return false;
+    }
 
     void update(float dt) {
         if (state == RobotState::CHARGING) {
-            battery += 30.0f * dt; // Regenerate battery at dock
+            battery += 35.0f * dt; // Fast dock regeneration
             if (battery >= 100.0f) {
                 battery = 100.0f;
                 state = RobotState::IDLE;
@@ -47,7 +70,6 @@ struct Robot {
             return;
         }
 
-        // Reduced energy drain rate for balanced operation
         if (state == RobotState::MOVING) {
             battery -= 4.0f * dt;
             if (battery < 0.0f) battery = 0.0f;
@@ -56,28 +78,51 @@ struct Robot {
         int start_gx = static_cast<int>(std::round(x));
         int start_gy = static_cast<int>(std::round(y));
 
-        // Dynamic Distance-to-Dock Evaluation
-        bool already_heading_home = !path.empty() && path.back().x == 0.0f && path.back().y == 0.0f;
-        if (state != RobotState::CHARGING && !already_heading_home) {
-            int path_len_to_dock = calculate_path(start_gx, start_gy, 0, 0);
-            float energy_per_unit = 4.0f / speed; 
-            float estimated_energy_needed = static_cast<float>(path_len_to_dock) * energy_per_unit;
+        // Dynamic Nearest-Dock Evaluation & Fail-Safe
+        bool heading_to_dock = !path.empty() && [&]() {
+            int last_x = static_cast<int>(path.back().x);
+            int last_y = static_cast<int>(path.back().y);
+            for (const auto& d : CHARGING_DOCKS) {
+                if (last_x == static_cast<int>(d.x) && last_y == static_cast<int>(d.y)) return true;
+            }
+            return false;
+        }();
+
+        if (state != RobotState::CHARGING && !heading_to_dock) {
+            // Find the closest charging dock via A* path length
+            int best_dock_x = 0, best_dock_y = 0;
+            int shortest_path_len = 99999;
+
+            for (const auto& dock : CHARGING_DOCKS) {
+                int p_len = calculate_path(start_gx, start_gy, static_cast<int>(dock.x), static_cast<int>(dock.y));
+                if (p_len > 0 && p_len < shortest_path_len) {
+                    shortest_path_len = p_len;
+                    best_dock_x = static_cast<int>(dock.x);
+                    best_dock_y = static_cast<int>(dock.y);
+                }
+            }
+
+            float energy_per_unit = 4.0f / speed;
+            float estimated_energy_needed = static_cast<float>(shortest_path_len) * energy_per_unit;
             float safety_margin_buffer = 10.0f;
 
             if (battery <= (estimated_energy_needed + safety_margin_buffer)) {
-                if (path_len_to_dock > 0 && (start_gx != 0 || start_gy != 0)) {
-                    path.clear();
-                    for (int i = 0; i < path_len_to_dock; i++) {
-                        path.push_back({(float)get_path_x(i), (float)get_path_y(i)});
+                if (shortest_path_len > 0 && !isAtDock()) {
+                    int path_len = calculate_path(start_gx, start_gy, best_dock_x, best_dock_y);
+                    if (path_len > 0) {
+                        path.clear();
+                        for (int i = 0; i < path_len; i++) {
+                            path.push_back({(float)get_path_x(i), (float)get_path_y(i)});
+                        }
+                        path_index = 0;
+                        state = RobotState::MOVING;
                     }
-                    path_index = 0;
-                    state = RobotState::MOVING;
                 }
             }
         }
 
-        // Dock connection check
-        if (start_gx == 0 && start_gy == 0 && battery < 80.0f && state != RobotState::CHARGING) {
+        // Auto-lock into charging when arriving at any dock with low/moderate battery
+        if (isAtDock() && battery < 85.0f && state != RobotState::CHARGING) {
             path.clear();
             state = RobotState::CHARGING;
             return;
@@ -101,7 +146,7 @@ struct Robot {
                     y += (dy / dist) * step;
                 }
             } else {
-                if (std::abs(x - 0.0f) < 0.1f && std::abs(y - 0.0f) < 0.1f) {
+                if (isAtDock()) {
                     state = RobotState::CHARGING;
                 } else {
                     state = RobotState::IDLE;
@@ -118,8 +163,9 @@ extern "C" {
     void init_fleet(int num_robots) {
         fleet.clear();
         for(int i = 0; i < num_robots; i++) {
-            // Stack robots neatly around the charging station dock at (0,0), (0,1), (0,2)
-            fleet.emplace_back(i, 0.0f, static_cast<float>(i));
+            // Assign each robot to start at its corresponding charging dock
+            int dock_idx = i % CHARGING_DOCKS.size();
+            fleet.emplace_back(i, CHARGING_DOCKS[dock_idx].x, CHARGING_DOCKS[dock_idx].y, dock_idx);
         }
     }
 
@@ -134,7 +180,6 @@ extern "C" {
     void assign_task(int robot_id, int target_x, int target_y) {
         if (robot_id < 0 || robot_id >= fleet.size()) return;
         Robot& r = fleet[robot_id];
-
         if (r.battery < 15.0f) return;
 
         int start_gx = static_cast<int>(std::round(r.x));
