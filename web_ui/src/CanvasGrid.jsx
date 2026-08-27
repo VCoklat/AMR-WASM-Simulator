@@ -10,66 +10,77 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
     const ctx = canvas.getContext('2d');
 
     const renderLoop = (time) => {
-      // 1. Hitung Delta Time (dt)
       const dt = (time - lastTimeRef.current) / 1000;
       lastTimeRef.current = time;
 
-      // 2. Update Simulasi di C++ (Mencegah lonjakan saat tab berpindah)
       if (dt > 0 && dt < 0.1) {
         cpp.updateSim(dt);
       }
 
-      // 3. Bersihkan frame sebelumnya
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 4. Render Lingkungan Gudang (Grid & Rintangan)
+      // 1. Render Warehouse Floor & Obstacles (Walls)
       for (let x = 0; x < gridWidth; x++) {
         for (let y = 0; y < gridHeight; y++) {
-          // Rintangan hardcoded agar sinkron dengan inisialisasi di App.jsx
           if (x === 10 && y >= 5 && y < 15) {
-            ctx.fillStyle = '#475569'; // Warna rak
+            ctx.fillStyle = '#475569'; // Warehouse Wall / Rack Obstacle
             ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+            
+            // Draw a subtle X to denote blocked wall tile
+            ctx.strokeStyle = '#334155';
+            ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
           } else {
-            ctx.strokeStyle = '#e2e8f0'; // Warna garis lantai
+            ctx.strokeStyle = '#e2e8f0';
             ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
           }
         }
       }
 
-      // 5. Render Armada Robot
+      // 2. Render Robot Routing Lines (Path Preview)
       for (let i = 0; i < numRobots; i++) {
-        // Ambil data real-time langsung dari memori C++
+        const pathLen = cpp.getActivePathLength ? cpp.getActivePathLength(i) : 0;
+        if (pathLen > 1) {
+          ctx.beginPath();
+          ctx.strokeStyle = '#3b82f6'; // Blue route line
+          ctx.lineWidth = 3;
+          const startX = cpp.getRobotX(i) * tileSize + tileSize / 2;
+          const startY = cpp.getRobotY(i) * tileSize + tileSize / 2;
+          ctx.moveTo(startX, startY);
+
+          for (let p = 0; p < pathLen; p++) {
+            const px = cpp.getActivePathX(i, p) * tileSize + tileSize / 2;
+            const py = cpp.getActivePathY(i, p) * tileSize + tileSize / 2;
+            ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        }
+      }
+
+      // 3. Render Robots
+      for (let i = 0; i < numRobots; i++) {
         const rx = cpp.getRobotX(i);
         const ry = cpp.getRobotY(i);
         const battery = Math.max(0, cpp.getBattery(i));
         const state = cpp.getState(i);
 
-        // Warna: Kuning (CHARGING), Biru (MOVING), Hijau (IDLE)
         ctx.fillStyle = state === 2 ? '#eab308' : (state === 1 ? '#3b82f6' : '#22c55e');
 
-        // Gambar body robot
         ctx.beginPath();
         ctx.arc(rx * tileSize + tileSize / 2, ry * tileSize + tileSize / 2, tileSize / 2.5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Indikator Baterai
         ctx.fillStyle = '#000';
         ctx.font = '10px Arial';
         ctx.fillText(`${battery.toFixed(0)}%`, rx * tileSize, ry * tileSize);
       }
 
-      // Panggil frame berikutnya
       animationRef.current = requestAnimationFrame(renderLoop);
     };
 
-    // Mulai Game Loop
     animationRef.current = requestAnimationFrame(renderLoop);
-
-    // Cleanup saat komponen dilepas (unmount)
     return () => cancelAnimationFrame(animationRef.current);
   }, [cpp, gridWidth, gridHeight, tileSize, numRobots]);
 
-  // Penanganan Interaksi Klik
   const handleCanvasClick = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -78,22 +89,30 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
     const gridX = Math.floor(clickX / tileSize);
     const gridY = Math.floor(clickY / tileSize);
 
-    // Mengirim perintah ke C++
+    // Dispatch Robot 0 to clicked coordinate
     cpp.assignTask(0, gridX, gridY);
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={gridWidth * tileSize}
-      height={gridHeight * tileSize}
-      onClick={handleCanvasClick}
-      style={{
-        border: '2px solid #333',
-        cursor: 'crosshair',
-        marginTop: '20px',
-        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-      }}
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <canvas
+        ref={canvasRef}
+        width={gridWidth * tileSize}
+        height={gridHeight * tileSize}
+        onClick={handleCanvasClick}
+        style={{
+          border: '2px solid #333',
+          cursor: 'crosshair',
+          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+        }}
+      />
+      {/* Legend / Descriptions */}
+      <div style={{ display: 'flex', gap: '15px', marginTop: '10px', fontSize: '0.85rem', color: '#64748b' }}>
+        <span>🟩 <strong>IDLE</strong></span>
+        <span>🟦 <strong>MOVING (with Route Line)</strong></span>
+        <span>🟨 <strong>CHARGING</strong></span>
+        <span>⬛ <strong>Warehouse Wall / Obstacle (Impassable)</strong></span>
+      </div>
+    </div>
   );
 }
