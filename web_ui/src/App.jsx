@@ -1,27 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-
-// Konstanta ukuran
-const TILE_SIZE = 30;
-const GRID_WIDTH = 20;
-const GRID_HEIGHT = 20;
-const NUM_ROBOTS = 3;
+import CanvasGrid from './CanvasGrid';
 
 export default function App() {
-  const canvasRef = useRef(null);
   const [isWasmReady, setIsWasmReady] = useState(false);
-  
-  // Referensi untuk menyimpan fungsi C++ yang sudah di-bind
   const cpp = useRef({});
-  const animationRef = useRef(null);
-  const lastTimeRef = useRef(0);
 
   useEffect(() => {
-    // Menunggu objek 'Module' dari engine.js selesai memuat engine.wasm
     const checkWasm = setInterval(() => {
       if (window.Module && window.Module._init_fleet) {
         clearInterval(checkWasm);
         
-        // Membungkus (wrapping) fungsi C++ ke fungsi JavaScript menggunakan cwrap
         cpp.current = {
           initFleet: window.Module.cwrap('init_fleet', 'null', ['number']),
           updateSim: window.Module.cwrap('update_simulation', 'null', ['number']),
@@ -33,10 +21,8 @@ export default function App() {
           setObstacle: window.Module.cwrap('set_obstacle', 'null', ['number', 'number', 'number']),
         };
 
-        // Inisialisasi armada robot
-        cpp.current.initFleet(NUM_ROBOTS);
+        cpp.current.initFleet(3);
         
-        // Setup Rintangan (Contoh: Membuat tembok di tengah gudang)
         for(let y = 5; y < 15; y++) {
           cpp.current.setObstacle(10, y, 1); 
         }
@@ -44,112 +30,79 @@ export default function App() {
         setIsWasmReady(true);
       }
     }, 100);
-
     return () => clearInterval(checkWasm);
   }, []);
 
-  // Main Simulation & Render Loop
-  useEffect(() => {
-    if (!isWasmReady) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-
-    const renderLoop = (time) => {
-      // Menghitung Delta Time (dt) dalam detik
-      const dt = (time - lastTimeRef.current) / 1000;
-      lastTimeRef.current = time;
-
-      // 1. UPDATE SIMULASI C++ (Hanya hitung jika dt wajar, max 0.1s untuk hindari glitch)
-      if (dt > 0 && dt < 0.1) {
-        cpp.current.updateSim(dt);
-      }
-
-      // 2. CLEAR CANVAS
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // 3. GAMBAR GRID & RINTANGAN
-      for (let x = 0; x < GRID_WIDTH; x++) {
-        for (let y = 0; y < GRID_HEIGHT; y++) {
-          // Asumsi sederhana: jika x==10 dan y antara 5-14 adalah rintangan (sesuai setup awal)
-          if (x === 10 && y >= 5 && y < 15) {
-            ctx.fillStyle = '#475569'; // Warna Rak/Tembok
-            ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-          } else {
-            ctx.strokeStyle = '#e2e8f0'; // Garis Grid
-            ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-          }
-        }
-      }
-
-      // 4. GAMBAR ROBOT (Baca posisi terbaru dari C++ memory)
-      for (let i = 0; i < NUM_ROBOTS; i++) {
-        const rx = cpp.current.getRobotX(i);
-        const ry = cpp.current.getRobotY(i);
-        const battery = Math.max(0, cpp.current.getBattery(i));
-        const state = cpp.current.getState(i);
-
-        // Tentukan warna berdasarkan State (0=IDLE, 1=MOVING, 2=CHARGING)
-        ctx.fillStyle = state === 2 ? '#eab308' : (state === 1 ? '#3b82f6' : '#22c55e');
-
-        // Gambar body robot (lingkaran)
-        ctx.beginPath();
-        ctx.arc(rx * TILE_SIZE + TILE_SIZE/2, ry * TILE_SIZE + TILE_SIZE/2, TILE_SIZE/2.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Gambar status baterai di atas robot
-        ctx.fillStyle = '#000';
-        ctx.font = '10px Arial';
-        ctx.fillText(`${battery.toFixed(0)}%`, rx * TILE_SIZE, ry * TILE_SIZE);
-      }
-
-      // Lanjutkan loop ke frame berikutnya (Target 60 FPS)
-      animationRef.current = requestAnimationFrame(renderLoop);
-    };
-
-    // Mulai animasi
-    animationRef.current = requestAnimationFrame(renderLoop);
-
-    return () => cancelAnimationFrame(animationRef.current);
-  }, [isWasmReady]);
-
-  // Handle Klik dari User untuk memerintahkan robot
-  const handleCanvasClick = (e) => {
-    if (!isWasmReady) return;
-
-    // Hitung koordinat klik relatif terhadap canvas
-    const rect = canvasRef.current.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-
-    // Konversi piksel ke Grid Index (0-19)
-    const gridX = Math.floor(clickX / TILE_SIZE);
-    const gridY = Math.floor(clickY / TILE_SIZE);
-
-    // Kirim perintah ke robot pertama (ID 0) sebagai percobaan
-    // Dalam logika sesungguhnya, Anda bisa mencari robot terdekat yang sedang IDLE
-    cpp.current.assignTask(0, gridX, gridY);
-  };
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontFamily: 'sans-serif', marginTop: '20px' }}>
-      <h2>AMR Fleet Real-Time Simulator</h2>
-      <p style={{ maxWidth: '600px', textAlign: 'center', color: '#666' }}>
-        Tugas simulasi robotika yang dioptimalkan dengan <strong>C++ WebAssembly</strong>. 
-        Klik di mana saja pada grid untuk menggerakkan robot ID 0.
-      </p>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontFamily: 'system-ui, sans-serif', padding: '30px 20px', backgroundColor: '#f8fafc', minHeight: '100vh', color: '#334155' }}>
       
-      {!isWasmReady ? (
-        <div style={{ marginTop: '50px' }}>Memuat Engine C++ (WASM)...</div>
-      ) : (
-        <canvas
-          ref={canvasRef}
-          width={GRID_WIDTH * TILE_SIZE}
-          height={GRID_HEIGHT * TILE_SIZE}
-          onClick={handleCanvasClick}
-          style={{ border: '2px solid #333', cursor: 'crosshair', marginTop: '10px' }}
-        />
-      )}
+      {/* Header Section */}
+      <div style={{ textAlign: 'center', maxWidth: '900px', marginBottom: '30px' }}>
+        <h1 style={{ color: '#0f172a', margin: '0 0 10px 0' }}>AMR Fleet Real-Time Simulator</h1>
+        <p style={{ fontSize: '1.1rem', color: '#64748b', margin: 0 }}>High-Performance Industrial Digital Twin powered by C++ & WebAssembly</p>
+      </div>
+
+      {/* Main Content Layout */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '30px', justifyContent: 'center', width: '100%', maxWidth: '1250px' }}>
+        
+        {/* Simulation Canvas Container */}
+        <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          {!isWasmReady ? (
+            <div style={{ padding: '150px 100px', textAlign: 'center', fontWeight: 'bold', color: '#64748b' }}>
+              Initializing C++ WASM Engine...
+            </div>
+          ) : (
+            <>
+              <CanvasGrid cpp={cpp.current} />
+              <div style={{ marginTop: '15px', padding: '12px 20px', backgroundColor: '#f1f5f9', borderRadius: '8px', color: '#475569', fontSize: '0.9rem', maxWidth: '600px', textAlign: 'center' }}>
+                <strong>Interactive Controls:</strong> Click anywhere on the open grid to dispatch an <span style={{ color: '#22c55e', fontWeight: 'bold' }}>IDLE</span> robot. Watch them transition to <span style={{ color: '#3b82f6', fontWeight: 'bold' }}>MOVING</span>, drain battery, and trigger auto-charging when critical.
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Explanatory Technical Panel */}
+        <div style={{ flex: '1', minWidth: '400px', maxWidth: '550px', backgroundColor: '#fff', padding: '30px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          
+          {/* Project Background */}
+          <div>
+            <h3 style={{ marginTop: 0, color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px' }}>Project Background</h3>
+            <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#475569', margin: '8px 0 0 0' }}>
+              In modern automated smart factories and logistics hubs, coordinating fleets of Autonomous Mobile Robots (AMRs) requires precise, deterministic real-time processing. This project models a warehouse floor digital twin to evaluate kinematics, runtime task routing, and autonomous power management.
+            </p>
+          </div>
+
+          {/* Architecture & Performance */}
+          <div>
+            <h3 style={{ color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px', marginTop: 0 }}>System Architecture & Performance</h3>
+            <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#475569', margin: '8px 0 0 0' }}>
+              The core simulation engine is written in native <strong>C++</strong> and compiled into <strong>WebAssembly (WASM)</strong> via Emscripten. It calculates physics, continuous-time motion dynamics, and state transitions independently in memory. The <strong>React</strong> frontend serves strictly as a high-performance presentation layer, querying memory via a <code>requestAnimationFrame</code> loop to maintain smooth 60 FPS rendering without Garbage Collection bottlenecks.
+            </p>
+          </div>
+
+          {/* Detailed State Machine & Charging Mechanics */}
+          <div>
+            <h3 style={{ color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px', marginTop: 0 }}>State Machine & Autonomous Charging Mechanics</h3>
+            <div style={{ fontSize: '0.88rem', lineHeight: '1.5', color: '#475569', display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '8px' }}>
+              <div>
+                <strong style={{ color: '#22c55e' }}>1. IDLE State (Green):</strong> Robots remain stationary on standby at their current grid positions, continuously monitoring tasks and battery levels.
+              </div>
+              <div>
+                <strong style={{ color: '#3b82f6' }}>2. MOVING State (Blue):</strong> Vector kinematics compute displacement using delta-time ($dt$) scaling to ensure frame-rate independent movement, steadily depleting battery reserves per second.
+              </div>
+              <div>
+                <strong style={{ color: '#eab308' }}>3. Autonomous Fail-Safe & CHARGING State (Yellow):</strong> 
+                <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>
+                  <li><strong>Critical Threshold Trigger:</strong> If battery drops below 20%, an automated fail-safe overrides current instructions, re-routing the robot back to the charging station at coordinate <code>(0,0)</code>.</li>
+                  <li><strong>Stationary Regeneration:</strong> Upon arriving at the dock, motion is paused and energy is regenerated using continuous-time formulas until reaching 100%.</li>
+                  <li><strong>State Recovery:</strong> Once fully charged, the robot automatically transitions back to <strong>IDLE</strong>, ready to accept new dispatch assignments.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </div>
   );
 }
