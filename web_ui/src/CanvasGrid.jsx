@@ -1,11 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 
-export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileSize = 30, numRobots = 3 }) {
+export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileSize = 30, numRobots = 3, onTaskAssigned }) {
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
   const lastTimeRef = useRef(0);
 
-  // Distributed charging docks coordinates matching C++ backend
   const chargingDocks = [
     { x: 0, y: 0 },
     { x: 0, y: 19 },
@@ -26,13 +25,11 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 1. Render Warehouse Floor & Impassable Walls
       for (let x = 0; x < gridWidth; x++) {
         for (let y = 0; y < gridHeight; y++) {
           if (x === 10 && y >= 5 && y < 15) {
             ctx.fillStyle = '#475569';
             ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
-            
             ctx.strokeStyle = '#334155';
             ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
           } else {
@@ -42,19 +39,15 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         }
       }
 
-      // 2. Render Charging Dock Stations with Glowing Pad & Lightning Icon
-      chargingDocks.forEach((dock, idx) => {
+      chargingDocks.forEach((dock) => {
         const dx = dock.x * tileSize;
         const dy = dock.y * tileSize;
-
-        // Dock background pad
-        ctx.fillStyle = '#fef08a'; // Soft yellow warning pad
+        ctx.fillStyle = '#fef08a';
         ctx.fillRect(dx + 2, dy + 2, tileSize - 4, tileSize - 4);
         ctx.strokeStyle = '#ca8a04';
         ctx.lineWidth = 2;
         ctx.strokeRect(dx + 2, dy + 2, tileSize - 4, tileSize - 4);
 
-        // Lightning Symbol
         ctx.fillStyle = '#a16207';
         ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'center';
@@ -62,7 +55,6 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         ctx.fillText('⚡', dx + tileSize / 2, dy + tileSize / 2);
       });
 
-      // 3. Render Active Routing Lines
       const routeColors = ['#3b82f6', '#ec4899', '#8b5cf6'];
       for (let i = 0; i < numRobots; i++) {
         const pathLen = cpp.getActivePathLength ? cpp.getActivePathLength(i) : 0;
@@ -83,18 +75,15 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         }
       }
 
-      // 4. Render Professional Industrial AMR Robot Icons
       for (let i = 0; i < numRobots; i++) {
         const rx = cpp.getRobotX(i) * tileSize;
         const ry = cpp.getRobotY(i) * tileSize;
         const battery = Math.max(0, cpp.getBattery(i));
         const state = cpp.getState(i);
 
-        // Status border / body color
         const statusColor = state === 2 ? '#eab308' : (state === 1 ? '#3b82f6' : '#22c55e');
 
-        // Draw sleek rounded AMR chassis body
-        ctx.fillStyle = '#1e293b'; // Dark industrial carbon chassis
+        ctx.fillStyle = '#1e293b';
         ctx.beginPath();
         ctx.roundRect(rx + 4, ry + 4, tileSize - 8, tileSize - 8, [6]);
         ctx.fill();
@@ -102,13 +91,11 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         ctx.strokeStyle = statusColor;
         ctx.stroke();
 
-        // Draw status indicator LED light on top of robot
         ctx.fillStyle = statusColor;
         ctx.beginPath();
         ctx.arc(rx + tileSize / 2, ry + tileSize / 2, 5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Label Robot ID and Battery Text above
         ctx.fillStyle = '#0f172a';
         ctx.font = 'bold 10px sans-serif';
         ctx.textAlign = 'left';
@@ -131,13 +118,12 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
     const gridX = Math.floor(clickX / tileSize);
     const gridY = Math.floor(clickY / tileSize);
 
-    // Auto-dispatch nearest available IDLE robot
     let bestRobotId = -1;
     let minDistance = Infinity;
 
     for (let i = 0; i < numRobots; i++) {
       const state = cpp.getState(i);
-      if (state === 0) { // IDLE
+      if (state === 0) {
         const rx = cpp.getRobotX(i);
         const ry = cpp.getRobotY(i);
         const dist = Math.hypot(rx - gridX, ry - gridY);
@@ -150,6 +136,7 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
 
     if (bestRobotId !== -1) {
       cpp.assignTask(bestRobotId, gridX, gridY);
+      if (onTaskAssigned) onTaskAssigned(bestRobotId, gridX, gridY);
     }
   };
 
