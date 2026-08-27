@@ -19,14 +19,13 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 1. Render Warehouse Floor & Obstacles (Walls)
+      // 1. Render Warehouse Floor & Impassable Walls
       for (let x = 0; x < gridWidth; x++) {
         for (let y = 0; y < gridHeight; y++) {
           if (x === 10 && y >= 5 && y < 15) {
-            ctx.fillStyle = '#475569'; // Warehouse Wall / Rack Obstacle
+            ctx.fillStyle = '#475569';
             ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
             
-            // Draw a subtle X to denote blocked wall tile
             ctx.strokeStyle = '#334155';
             ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
           } else {
@@ -36,12 +35,13 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         }
       }
 
-      // 2. Render Robot Routing Lines (Path Preview)
+      // 2. Render Active Routing Lines for all robots
+      const routeColors = ['#3b82f6', '#ec4899', '#8b5cf6'];
       for (let i = 0; i < numRobots; i++) {
         const pathLen = cpp.getActivePathLength ? cpp.getActivePathLength(i) : 0;
         if (pathLen > 1) {
           ctx.beginPath();
-          ctx.strokeStyle = '#3b82f6'; // Blue route line
+          ctx.strokeStyle = routeColors[i % routeColors.length];
           ctx.lineWidth = 3;
           const startX = cpp.getRobotX(i) * tileSize + tileSize / 2;
           const startY = cpp.getRobotY(i) * tileSize + tileSize / 2;
@@ -56,7 +56,7 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         }
       }
 
-      // 3. Render Robots
+      // 3. Render Fleet Robots with IDs and Telemetry
       for (let i = 0; i < numRobots; i++) {
         const rx = cpp.getRobotX(i);
         const ry = cpp.getRobotY(i);
@@ -69,9 +69,10 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         ctx.arc(rx * tileSize + tileSize / 2, ry * tileSize + tileSize / 2, tileSize / 2.5, 0, Math.PI * 2);
         ctx.fill();
 
+        // Label Robot ID and Battery
         ctx.fillStyle = '#000';
-        ctx.font = '10px Arial';
-        ctx.fillText(`${battery.toFixed(0)}%`, rx * tileSize, ry * tileSize);
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText(`R${i} ${battery.toFixed(0)}%`, rx * tileSize - 2, ry * tileSize - 4);
       }
 
       animationRef.current = requestAnimationFrame(renderLoop);
@@ -89,8 +90,26 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
     const gridX = Math.floor(clickX / tileSize);
     const gridY = Math.floor(clickY / tileSize);
 
-    // Dispatch Robot 0 to clicked coordinate
-    cpp.assignTask(0, gridX, gridY);
+    // Concurrent dispatch: Find the nearest IDLE robot to handle the click
+    let bestRobotId = -1;
+    let minDistance = Infinity;
+
+    for (let i = 0; i < numRobots; i++) {
+      const state = cpp.getState(i);
+      if (state === 0) { // IDLE
+        const rx = cpp.getRobotX(i);
+        const ry = cpp.getRobotY(i);
+        const dist = Math.hypot(rx - gridX, ry - gridY);
+        if (dist < minDistance) {
+          minDistance = dist;
+          bestRobotId = i;
+        }
+      }
+    }
+
+    if (bestRobotId !== -1) {
+      cpp.assignTask(bestRobotId, gridX, gridY);
+    }
   };
 
   return (
@@ -106,12 +125,11 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
           boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
         }}
       />
-      {/* Legend / Descriptions */}
       <div style={{ display: 'flex', gap: '15px', marginTop: '10px', fontSize: '0.85rem', color: '#64748b' }}>
         <span>🟩 <strong>IDLE</strong></span>
-        <span>🟦 <strong>MOVING (with Route Line)</strong></span>
+        <span>🟦 <strong>MOVING</strong></span>
         <span>🟨 <strong>CHARGING</strong></span>
-        <span>⬛ <strong>Warehouse Wall / Obstacle (Impassable)</strong></span>
+        <span>⬛ <strong>Warehouse Wall</strong></span>
       </div>
     </div>
   );
