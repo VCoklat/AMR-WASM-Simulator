@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 echo "Mulai kompilasi C++ ke WebAssembly..."
 

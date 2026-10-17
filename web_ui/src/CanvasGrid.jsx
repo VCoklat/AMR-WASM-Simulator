@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileSize = 30, numRobots = 3, onTaskAssigned }) {
+export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileSize = 30, numRobots = 3, onTaskAssigned, clickMode = 'dispatch', onCellToggle }) {
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
   const lastTimeRef = useRef(0);
@@ -35,6 +35,40 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
           } else {
             ctx.strokeStyle = '#e2e8f0';
             ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
+          }
+        }
+      }
+
+      // Scenario A: shared human-AMR aisle zone
+      if (cpp.getZoneBound) {
+        const zx0 = cpp.getZoneBound(0), zy0 = cpp.getZoneBound(1);
+        const zx1 = cpp.getZoneBound(2), zy1 = cpp.getZoneBound(3);
+        const full = cpp.getZoneFull() === 1;
+        ctx.fillStyle = full ? 'rgba(239,68,68,0.18)' : 'rgba(251,146,60,0.12)';
+        ctx.fillRect(zx0 * tileSize, zy0 * tileSize, (zx1 - zx0 + 1) * tileSize, (zy1 - zy0 + 1) * tileSize);
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = full ? '#dc2626' : '#f97316';
+        ctx.strokeRect(zx0 * tileSize, zy0 * tileSize, (zx1 - zx0 + 1) * tileSize, (zy1 - zy0 + 1) * tileSize);
+        ctx.setLineDash([]);
+        ctx.fillStyle = full ? '#dc2626' : '#c2410c';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(`ZONE ${cpp.getZoneOccupied()}/${cpp.getZoneCapacity()}`, zx0 * tileSize + 2, zy0 * tileSize - 3);
+
+        // Occupied cells reported by the edge camera
+        for (let x = 0; x < gridWidth; x++) {
+          for (let y = 0; y < gridHeight; y++) {
+            if (cpp.getCellOccupied(x, y) === 1) {
+              ctx.fillStyle = '#b45309';
+              ctx.fillRect(x * tileSize + 5, y * tileSize + 5, tileSize - 10, tileSize - 10);
+              ctx.fillStyle = '#fff';
+              ctx.font = 'bold 12px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText('!', x * tileSize + tileSize / 2, y * tileSize + tileSize / 2);
+            }
           }
         }
       }
@@ -81,7 +115,7 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         const battery = Math.max(0, cpp.getBattery(i));
         const state = cpp.getState(i);
 
-        const statusColor = state === 2 ? '#eab308' : (state === 1 ? '#3b82f6' : '#22c55e');
+        const statusColor = state === 3 ? '#ef4444' : state === 2 ? '#eab308' : (state === 1 ? '#3b82f6' : '#22c55e');
 
         ctx.fillStyle = '#1e293b';
         ctx.beginPath();
@@ -118,6 +152,11 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
     const gridX = Math.floor(clickX / tileSize);
     const gridY = Math.floor(clickY / tileSize);
 
+    if (clickMode === 'object') {
+      if (onCellToggle) onCellToggle(gridX, gridY);
+      return;
+    }
+
     let bestRobotId = -1;
     let minDistance = Infinity;
 
@@ -149,7 +188,7 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         onClick={handleCanvasClick}
         style={{
           border: '2px solid #333',
-          cursor: 'crosshair',
+          cursor: clickMode === 'object' ? 'cell' : 'crosshair',
           boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
           backgroundColor: '#ffffff'
         }}
@@ -158,6 +197,8 @@ export default function CanvasGrid({ cpp, gridWidth = 20, gridHeight = 20, tileS
         <span>🟩 <strong>IDLE</strong></span>
         <span>🟦 <strong>MOVING</strong></span>
         <span>🟨 <strong>CHARGING</strong></span>
+        <span>🟥 <strong>HALTED</strong></span>
+        <span>🟧 <strong>Shared Zone / Object</strong></span>
         <span>⚡ <strong>Charging Dock</strong></span>
         <span>⬛ <strong>Warehouse Wall</strong></span>
       </div>
