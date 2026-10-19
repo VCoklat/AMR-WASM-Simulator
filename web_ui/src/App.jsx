@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import CanvasGrid from './CanvasGrid';
 import VisionPanel from './vision/VisionPanel';
+import FleetHealthPanel from './fleet/FleetHealthPanel';
 
 export default function App() {
   const [isWasmReady, setIsWasmReady] = useState(false);
@@ -26,6 +27,26 @@ export default function App() {
   const buzzerTimerRef = useRef(null);
   const mutedRef = useRef(false);
   const scenarioTimersRef = useRef([]);
+
+  // PS-1: status kamera edge untuk dasbor armada
+  const cameraStatusRef = useRef({ fault: false });
+  // PS-4: dampak keputusan. Bandingkan reroute adaptif dengan kebijakan statis (robot menunggu
+  // sampai lorong bebas). Waktu tunggu statis = lama blokade untuk setiap robot yang rutenya terhalang.
+  const blocksRef = useRef(new Map());
+  const closedWaitRef = useRef(0);
+  // waktu tunggu yang dihindari dihitung terus, termasuk blokade yang masih berlangsung
+  useEffect(() => {
+    const h = setInterval(() => {
+      let w = closedWaitRef.current;
+      const now = performance.now();
+      blocksRef.current.forEach((b) => { w += ((now - b.t0) / 1000) * b.robots.length; });
+      const detourSec = cpp.current.getTotalDetour ? cpp.current.getTotalDetour() / ROBOT_SPEED : 0;
+      setPs4((p) => ({ ...p, waitAvoided: w, detourSec }));
+    }, 500);
+    return () => clearInterval(h);
+  }, []);
+  const [ps4, setPs4] = useState({ blocks: 0, affected: 0, waitAvoided: 0, detourSec: 0, msg: 'Belum ada kejadian.' });
+  const ROBOT_SPEED = 5; // sel per detik (sama dengan engine)
 
   const addLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -132,6 +153,9 @@ export default function App() {
     cpp.current.resetKpi();
     setLatencies([]);
     applyZoneState(null);
+    blocksRef.current.clear();
+    closedWaitRef.current = 0;
+    setPs4({ blocks: 0, affected: 0, waitAvoided: 0, detourSec: 0, msg: 'Belum ada kejadian.' });
     addLog("Manual Action: Fleet, zone objects and KPIs reset.");
   };
 
@@ -190,7 +214,31 @@ export default function App() {
   const handleOccupancyEvent = (x, y, occupiedFlag, source = 'operator', t0 = performance.now()) => {
     if (!isWasmReady) return;
     const value = occupiedFlag === undefined ? (cpp.current.getCellOccupied(x, y) ? 0 : 1) : (occupiedFlag ? 1 : 0);
+    const key = `${x},${y}`;
+    if (value === 1 && !blocksRef.current.has(key)) {
+      const hit = [];
+      for (let i = 0; i < 3; i++) {
+        const len = cpp.current.getActivePathLength(i);
+        for (let k = 0; k < len; k++) {
+          if (cpp.current.getActivePathX(i, k) === x && cpp.current.getActivePathY(i, k) === y) { hit.push(i); break; }
+        }
+      }
+      blocksRef.current.set(key, { t0: performance.now(), robots: hit });
+      const msg = hit.length
+        ? `Lorong (${x},${y}) terhalang. ${hit.map((r) => 'R' + r).join(', ')} dialihkan lewat jalur lain, tidak perlu menunggu.`
+        : `Lorong (${x},${y}) terisi. Tidak ada robot yang melintas di sana.`;
+      setPs4((p) => ({ ...p, blocks: p.blocks + 1, affected: p.affected + hit.length, msg }));
+    }
     cpp.current.setCellOccupied(x, y, value);
+    if (value === 0 && blocksRef.current.has(key)) {
+      const b = blocksRef.current.get(key);
+      blocksRef.current.delete(key);
+      const dur = (performance.now() - b.t0) / 1000;
+      const detourSec = cpp.current.getTotalDetour() / ROBOT_SPEED;
+      closedWaitRef.current += dur * b.robots.length;
+      setPs4((p) => ({ ...p, detourSec,
+        msg: `Lorong (${x},${y}) bebas lagi setelah ${dur.toFixed(1)} s.${b.robots.length ? ` Tanpa sistem, ${b.robots.map((r) => 'R' + r).join(', ')} akan menunggu selama itu.` : ''}` }));
+    }
     addLog(`[${source}] Cell (${x}, ${y}) ${value ? 'OCCUPIED' : 'cleared'}`);
     applyZoneState(t0);
   };
@@ -338,8 +386,35 @@ export default function App() {
             <VisionPanel
               onCell={(x, y, occ, source, t0) => handleOccupancyEvent(x, y, occ, source, t0)}
               onLog={addLog}
+              onSensorStatus={(fault) => { cameraStatusRef.current.fault = fault; }}
             />
           )}
+
+          {/* PS-4: dampak keputusan untuk petugas non-teknis */}
+          <div style={{ backgroundColor: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <h3 style={{ margin: 0, color: '#0f172a', fontSize: '1rem' }}>Dampak Keputusan (PS-4)</h3>
+            <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px', fontSize: '0.95rem', color: '#1e3a8a' }}>
+              {ps4.msg}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', fontSize: '0.8rem' }}>
+              {[
+                ['Lorong terhalang', ps4.blocks],
+                ['Robot dialihkan', ps4.affected],
+                ['Waktu tunggu dihindari', `${ps4.waitAvoided.toFixed(1)} s`],
+                ['Hemat bersih', `${(ps4.waitAvoided - ps4.detourSec).toFixed(1)} s`],
+              ].map(([k, v]) => (
+                <div key={k} style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px' }}>
+                  <div style={{ color: '#64748b' }}>{k}</div>
+                  <div style={{ fontWeight: 'bold', color: '#0f172a' }}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+              Pembanding: kebijakan statis menunggu sampai lorong bebas. Hemat bersih = waktu tunggu dihindari − waktu tempuh tambahan jalur alternatif ({ps4.detourSec.toFixed(1)} s, dari {kpi.detour.toFixed(0)} sel tambahan).
+            </div>
+          </div>
+
+          {isWasmReady && <FleetHealthPanel cpp={cpp.current} numRobots={3} cameraStatusRef={cameraStatusRef} onLog={addLog} />}
 
           {/* FMS Controls */}
           <div style={{ backgroundColor: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', display: 'flex', gap: '15px', justifyContent: 'center', alignItems: 'center' }}>

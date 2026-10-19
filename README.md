@@ -111,3 +111,9 @@ Model: letakkan `web_ui/public/models/embedder.onnx` (input `[N,3,S,S]`). Tanpa 
 - **Unggah gambar** memakai foto diorama sendiri sebagai sumber kamera.
 - **Contoh gambar** memuat gambar bawaan di `web_ui/public/samples/` (dibuat ulang dengan `python3 web_ui/scripts/generate_samples.py`). Klik **Preset contoh** agar kalibrasi lorong cocok dengan gambar contoh.
 - Alur demo: pilih "Lorong kosong" → Preset contoh → Kalibrasi kosong → pilih "Palet + forklift (zona penuh)" (buzzer menyala, AMR berhenti) → pilih "Karung (sampel 1..5)", pilih sel kanan-bawah, Daftarkan → "Karung di sel lain" → "Lensa tertutup" (gangguan sensor).
+
+## PS-1, PS-4, PS-5 dalam satu dasbor
+
+- **PS-5 (Edge AI CCTV):** panel Kamera Edge (okupansi per sel, kapasitas zona, buzzer, latensi alert, benchmark).
+- **PS-4 (data → keputusan):** panel *Dampak Keputusan* menampilkan pesan untuk petugas non-teknis dan membandingkan reroute adaptif dengan kebijakan statis (robot menunggu sampai lorong bebas): lorong terhalang, robot dialihkan, waktu tunggu yang dihindari, hemat bersih setelah dikurangi waktu tempuh jalur alternatif.
+- **PS-1 (satu dasbor, banyak device):** panel *Kesehatan Armada Perangkat* berisi 3 jenis device (AMR, kamera edge, sensor gudang). Baterai AMR dari engine WASM, status CAM-01 dari panel kamera; telemetri lain disimulasikan (×60, 1 detik = 1 menit). Prediksi tren (regresi linear) memberi perkiraan waktu sampai offline dan alasannya; data sensor yang macet ditandai sebagai data janggal. Suntik gangguan untuk demo dan lihat *lead time* (berapa menit sebelum offline perangkat sudah ditandai).

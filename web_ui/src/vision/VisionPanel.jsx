@@ -97,7 +97,7 @@ function frameStats(img) {
   return { mean, std: Math.sqrt(Math.max(0, s2 / n - mean * mean)) };
 }
 
-export default function VisionPanel({ onCell, onLog }) {
+export default function VisionPanel({ onCell, onLog, onSensorStatus }) {
   const videoRef = useRef(null);
   const overlayRef = useRef(null);
   const workRef = useRef(null);
@@ -210,6 +210,7 @@ export default function VisionPanel({ onCell, onLog }) {
       const fault = st.mean < 25 || st.std < 6;
       if (fault !== faultRef.current) {
         faultRef.current = fault;
+        onSensorStatus && onSensorStatus(fault);
         onLog && onLog(fault ? 'GANGGUAN SENSOR: kamera tertutup/gelap. Kejadian okupansi dibekukan.' : 'Sensor kamera normal kembali.');
       }
       if (fault) { setStatus('Gangguan sensor: kamera tertutup atau gelap'); return; }
