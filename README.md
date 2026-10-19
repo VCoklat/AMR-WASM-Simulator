@@ -94,3 +94,14 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ---
 
 Developed by Dedy Van Hauten
+## Kamera Edge di Peramban (Skenario A/B)
+
+Panel "Kamera Edge" menjalankan seluruh pipeline visi di peramban, luring, tanpa server:
+webcam → crop sel lorong → embedding di Web Worker (ONNX Runtime Web, WASM) → prototipe few-shot → debounce → `set_cell_occupied` di engine WASM.
+
+1. `cd web_ui && npm install && npm run dev` (skrip `predev`/`prebuild` menyalin runtime WASM ONNX ke `public/ort`).
+2. Nyalakan kamera → **Kalibrasi lorong** (klik 4 sudut: kiri-atas, kanan-atas, kanan-bawah, kiri-bawah) → **Kalibrasi kosong** saat lorong kosong.
+3. Benda baru: pilih sel, isi nama, **Daftarkan (5 foto)**. Ambang "tidak dikenal" diatur dengan slider τ.
+4. **Benchmark** mencatat latensi p50/p95 per crop di log (salin ke laporan teknis).
+
+Model: letakkan `web_ui/public/models/embedder.onnx` (input `[N,3,S,S]`). Tanpa model, panel memakai embedding fallback dan diberi label di UI. Lensa tertutup/gelap terdeteksi sebagai gangguan sensor dan kejadian dibekukan.

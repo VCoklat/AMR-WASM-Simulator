@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import CanvasGrid from './CanvasGrid';
+import VisionPanel from './vision/VisionPanel';
 
 export default function App() {
   const [isWasmReady, setIsWasmReady] = useState(false);
@@ -331,6 +332,14 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          {/* Kamera edge di peramban (ONNX Runtime Web, luring) */}
+          {isWasmReady && (
+            <VisionPanel
+              onCell={(x, y, occ, source, t0) => handleOccupancyEvent(x, y, occ, source, t0)}
+              onLog={addLog}
+            />
+          )}
 
           {/* FMS Controls */}
           <div style={{ backgroundColor: '#fff', padding: '15px 20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', display: 'flex', gap: '15px', justifyContent: 'center', alignItems: 'center' }}>

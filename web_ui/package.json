@@ -6,9 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "copy-ort": "node scripts/copy-ort.mjs",
+    "predev": "node scripts/copy-ort.mjs",
+    "prebuild": "node scripts/copy-ort.mjs"
   },
   "dependencies": {
+    "onnxruntime-web": "^1.20.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
