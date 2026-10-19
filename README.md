@@ -105,3 +105,9 @@ webcam → crop sel lorong → embedding di Web Worker (ONNX Runtime Web, WASM) 
 4. **Benchmark** mencatat latensi p50/p95 per crop di log (salin ke laporan teknis).
 
 Model: letakkan `web_ui/public/models/embedder.onnx` (input `[N,3,S,S]`). Tanpa model, panel memakai embedding fallback dan diberi label di UI. Lensa tertutup/gelap terdeteksi sebagai gangguan sensor dan kejadian dibekukan.
+
+### Tanpa webcam: unggah gambar atau pakai contoh
+
+- **Unggah gambar** memakai foto diorama sendiri sebagai sumber kamera.
+- **Contoh gambar** memuat gambar bawaan di `web_ui/public/samples/` (dibuat ulang dengan `python3 web_ui/scripts/generate_samples.py`). Klik **Preset contoh** agar kalibrasi lorong cocok dengan gambar contoh.
+- Alur demo: pilih "Lorong kosong" → Preset contoh → Kalibrasi kosong → pilih "Palet + forklift (zona penuh)" (buzzer menyala, AMR berhenti) → pilih "Karung (sampel 1..5)", pilih sel kanan-bawah, Daftarkan → "Karung di sel lain" → "Lensa tertutup" (gangguan sensor).

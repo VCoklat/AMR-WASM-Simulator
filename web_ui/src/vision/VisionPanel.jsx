@@ -13,6 +13,22 @@ const COLS = 2;
 const ROWS = 4;
 const toEngine = (c, r) => ({ x: 11 + c, y: 7 + r * 2 });
 
+// Contoh gambar (dibuat oleh scripts/generate_samples.py) dan preset kalibrasi lorongnya.
+const SAMPLES = [
+  ['01_kosong.png', 'Lorong kosong'],
+  ['02_palet.png', 'Palet di lorong'],
+  ['03_palet_forklift_penuh.png', 'Palet + forklift (zona penuh)'],
+  ['04_kardus.png', 'Kardus'],
+  ['05_karung_1.png', 'Karung (sampel 1)'],
+  ['05_karung_2.png', 'Karung (sampel 2)'],
+  ['05_karung_3.png', 'Karung (sampel 3)'],
+  ['05_karung_4.png', 'Karung (sampel 4)'],
+  ['05_karung_5.png', 'Karung (sampel 5)'],
+  ['06_karung_sel_lain.png', 'Karung di sel lain'],
+  ['07_lensa_tertutup.png', 'Lensa tertutup'],
+];
+const SAMPLE_QUAD = [[100, 20], [220, 20], [220, 220], [100, 220]];
+
 function loadStore() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; }
 }
@@ -100,6 +116,10 @@ export default function VisionPanel({ onCell, onLog }) {
   const latRef = useRef([]);
 
   const [running, setRunning] = useState(false);
+  const [source, setSource] = useState('none'); // 'webcam' | 'image'
+  const [imgSrc, setImgSrc] = useState(null);
+  const sourceRef = useRef('none');
+  const imgRef = useRef(null);
   const [info, setInfo] = useState({ mode: 'memuat…', size: 96 });
   const [calibrating, setCalibrating] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -146,10 +166,16 @@ export default function VisionPanel({ onCell, onLog }) {
   });
 
   const grab = () => {
-    const v = videoRef.current;
-    if (!v || v.readyState < 2) return null;
     const ctx = workRef.current.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(v, 0, 0, FW, FH);
+    if (sourceRef.current === 'image') {
+      const im = imgRef.current;
+      if (!im || !im.complete || !im.naturalWidth) return null;
+      ctx.drawImage(im, 0, 0, FW, FH);
+    } else {
+      const v = videoRef.current;
+      if (!v || v.readyState < 2) return null;
+      ctx.drawImage(v, 0, 0, FW, FH);
+    }
     return ctx.getImageData(0, 0, FW, FH);
   };
 
@@ -225,6 +251,8 @@ export default function VisionPanel({ onCell, onLog }) {
   const start = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+      sourceRef.current = 'webcam';
+      setSource('webcam');
       videoRef.current.srcObject = stream;
       await videoRef.current.play();
       setRunning(true);
@@ -291,6 +319,37 @@ export default function VisionPanel({ onCell, onLog }) {
     }
     setSelected(best);
     setTimeout(draw, 0);
+  };
+
+  // Sumber gambar statis: unggahan pengguna atau contoh bawaan (tanpa webcam).
+  const useImage = (url, name) => {
+    const im = new Image();
+    im.onload = () => {
+      imgRef.current = im;
+      sourceRef.current = 'image';
+      setSource('image');
+      setImgSrc(url);
+      const v = videoRef.current;
+      if (v && v.srcObject) { v.srcObject.getTracks().forEach((t) => t.stop()); v.srcObject = null; }
+      setRunning(true);
+      setStatus(quadRef.current ? 'Memantau gambar' : 'Klik "Kalibrasi lorong" (atau "Preset contoh") lalu "Kalibrasi kosong"');
+      onLog && onLog(`Sumber gambar: ${name}`);
+    };
+    im.src = url;
+  };
+
+  const onUpload = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) useImage(URL.createObjectURL(f), f.name);
+    e.target.value = '';
+  };
+
+  const usePresetQuad = () => {
+    quadRef.current = SAMPLE_QUAD.map((p) => [...p]);
+    emptyRef.current = [];
+    persist();
+    onLog && onLog('Preset lorong contoh dipakai. Tampilkan gambar kosong lalu "Kalibrasi kosong".');
+    draw();
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -363,13 +422,23 @@ export default function VisionPanel({ onCell, onLog }) {
         </span>
       </div>
       <div style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', backgroundColor: '#0f172a', borderRadius: '8px', overflow: 'hidden' }}>
-        <video ref={videoRef} muted playsInline style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill' }} />
+        <video ref={videoRef} muted playsInline style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', display: source === 'image' ? 'none' : 'block' }} />
+        {source === 'image' && imgSrc && <img src={imgSrc} alt="sumber" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill' }} />}
         <canvas ref={overlayRef} width={FW} height={FH} onClick={onOverlayClick} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: calibrating ? 'crosshair' : 'pointer' }} />
         <canvas ref={workRef} width={FW} height={FH} style={{ display: 'none' }} />
       </div>
       <div style={{ fontSize: '0.8rem', color: faultRef.current ? '#dc2626' : '#475569', fontWeight: faultRef.current ? 700 : 400 }}>Status: {status}</div>
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        {!running && <button style={btn('#2563eb')} onClick={start}>▶ Nyalakan kamera</button>}
+        {source !== 'webcam' && <button style={btn('#2563eb')} onClick={start}>▶ Nyalakan kamera</button>}
+        <label style={{ ...btn('#0369a1'), display: 'inline-block' }}>
+          🖼 Unggah gambar
+          <input type="file" accept="image/*" onChange={onUpload} style={{ display: 'none' }} />
+        </label>
+        <select defaultValue="" onChange={(e) => { if (e.target.value) useImage(`/samples/${e.target.value}`, e.target.value); }} style={{ padding: '6px', fontSize: '0.8rem' }}>
+          <option value="" disabled>Contoh gambar…</option>
+          {SAMPLES.map(([f, t]) => <option key={f} value={f}>{t}</option>)}
+        </select>
+        <button style={btn('#475569')} onClick={usePresetQuad}>Preset contoh</button>
         <button style={btn(calibrating ? '#b45309' : '#64748b')} onClick={() => { clicksRef.current = []; setCalibrating(true); setStatus('Klik 4 sudut lorong: kiri-atas, kanan-atas, kanan-bawah, kiri-bawah'); }}>📐 Kalibrasi lorong</button>
         <button style={btn('#16a34a')} onClick={calibrateEmpty}>Kalibrasi kosong</button>
         <button style={btn('#7c3aed')} onClick={benchmark}>⏱ Benchmark</button>
